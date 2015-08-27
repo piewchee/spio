@@ -49,24 +49,16 @@ module spio_spinnaker_link_receiver
   //-------------------------------------------------------------
   // internal signals
   //-------------------------------------------------------------
-  wire [6:0] synced_sl_data_2of7;  // synchronized 2of7-encoded data input
-
   wire [6:0] flt_data_2of7;  // 2of7-encoded data
   wire       flt_vld;
   wire       flt_rdy;
 
 
-  spio_spinnaker_link_sync #(.SIZE(7)) sync
-  ( .CLK_IN (CLK_IN),
-    .IN     (SL_DATA_2OF7_IN),
-    .OUT    (synced_sl_data_2of7)
-  );
-		
-  flit_input_if fi
+  spio_spinnaker_link_async_to_sync_fifo fi
   (
     .CLK_IN          (CLK_IN),
     .RESET_IN        (RESET_IN),
-    .SL_DATA_2OF7_IN (synced_sl_data_2of7),
+    .SL_DATA_2OF7_IN (SL_DATA_2OF7_IN),
     .SL_ACK_OUT      (SL_ACK_OUT),
     .flt_data_2of7   (flt_data_2of7),
     .flt_vld         (flt_vld),
@@ -84,153 +76,6 @@ module spio_spinnaker_link_receiver
     .PKT_VLD_OUT     (PKT_VLD_OUT),
     .PKT_RDY_IN      (PKT_RDY_IN)
   );
-endmodule
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-`timescale 1ns / 1ps
-module flit_input_if
-(
-  input                         CLK_IN,
-  input                         RESET_IN,
-
-  // SpiNNaker link interface
-  input                   [6:0] SL_DATA_2OF7_IN,
-  output reg                    SL_ACK_OUT,
-
-  // packet deserializer interface
-  output reg              [6:0] flt_data_2of7,
-  output reg                    flt_vld,
-  input                         flt_rdy
-);
-
-  //-------------------------------------------------------------
-  // constants
-  //-------------------------------------------------------------
-  localparam STATE_BITS = 1;
-  localparam STRT_ST    = 0;   // need to send an ack on reset exit!
-  localparam IDLE_ST    = STRT_ST + 1;
-
-
-  //-------------------------------------------------------------
-  // internal signals
-  //-------------------------------------------------------------
-  reg send_ack;  // send ack to SpiNNaker next value of SL_ACK_OUT
-
-  reg [6:0] old_data;  // remember previous nrz 2of7 data for decoding
-  reg [6:0] rtz_data;  // data translated from nrz to rtz
-
-  reg new_flit;  // new flit arrived
- 
-  reg flt_busy;  // deserializer not ready for new flit
-
-  reg [STATE_BITS - 1:0] state;  // current state
-
-
-  //-------------------------------------------------------------
-  // 2-of-7 symbol detector (correct data, eop or error)
-  //-------------------------------------------------------------
-  function detect_2of7 ;
-    input [6:0] data;
-
-    case (data)
-      0, 1, 2, 4,
-      8, 16, 32,
-      64:         detect_2of7 = 0;  // incomplete (no/single-bit change)
-      default:    detect_2of7 = 1;  // correct data, eop or error
-    endcase
-  endfunction
-
-
-  //-------------------------------------------------------------
-  // SpiNNaker link interface: generate SL_ACK_OUT
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      SL_ACK_OUT <= 1'b0;
-    else
-      if (send_ack)
-        SL_ACK_OUT <= ~SL_ACK_OUT;
-
-
-  //-------------------------------------------------------------
-  // next value of SL_ACK_OUT
-  //-------------------------------------------------------------
-  always @(*)
-    case (state)
-      STRT_ST:   send_ack = 1'b1;  // mimic SpiNNaker: ack on reset exit
-
-      IDLE_ST: if (new_flit && !flt_busy)
-                 send_ack = 1'b1;  //  ack new flit when ready
-               else
-                 send_ack = 1'b0;   //  no ack!
-    endcase 
-
-
-  //-------------------------------------------------------------
-  // remember previous nrz 2of7 data for decoding
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN)
-    case (state)
-      STRT_ST:   old_data <= SL_DATA_2OF7_IN;  // remember initial nrz data
-
-      default: if (new_flit && !flt_busy)
-                 old_data <= SL_DATA_2OF7_IN;  // remember incoming nrz data
-    endcase
-
-
-  //---------------------------------------------------------------
-  // translate data from nrz to rtz
-  //---------------------------------------------------------------
-  always @(*)
-    rtz_data = SL_DATA_2OF7_IN ^ old_data;
-
-
-  //-------------------------------------------------------------
-  // detect the arrival of a new flit (2 or more transitions)
-  //-------------------------------------------------------------
-  always @(*)
-    new_flit = detect_2of7 (rtz_data);
-
-
-  //-------------------------------------------------------------
-  // packet deserializer interface: generate flt_data_2of7
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN)
-    if (new_flit && !flt_busy)
-      flt_data_2of7 <= rtz_data;  // transfer incoming rtz data
-
-
-  //-------------------------------------------------------------
-  // keep track of flit data validity
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      flt_vld = 1'b0;
-    else
-      if (!flt_busy)
-        if (new_flit)
-          flt_vld = 1'b1;
-        else
-          flt_vld = 1'b0;
-
-
-  //-------------------------------------------------------------
-  // deserializer not ready for new flit
-  //-------------------------------------------------------------
-  always @(*)
-    flt_busy = flt_vld && !flt_rdy;
-
-
-  //-------------------------------------------------------------
-  // state machine
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      state <= STRT_ST;  // need to send an ack on reset exit!
-    else
-      state <= IDLE_ST;
 endmodule
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
