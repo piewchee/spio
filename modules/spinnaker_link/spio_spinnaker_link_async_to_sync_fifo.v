@@ -1,5 +1,5 @@
 // -------------------------------------------------------------------------
-//  spiNNaker link async 2-0of-7 data fifo synchronizer
+//  spiNNaker link 2-of-7 data async to sync fifo
 //
 // -------------------------------------------------------------------------
 // AUTHOR
@@ -201,7 +201,8 @@ module spio_spinnaker_link_async_to_sync_fifo
 
 
   //-------------------------------------------------------------
-  // sequence operations: wait for not full, write buffer, update wrpg
+  // sequence operations:
+  // wait for not full, write buffer and update wrpg
   //-------------------------------------------------------------
   wire full_to_write;
   wire write_to_update;
@@ -213,7 +214,6 @@ module spio_spinnaker_link_async_to_sync_fifo
   wire upd_r;
   wire upd_a;
 
-   
   sel fulls
   (
     .rst (RESET_IN),
@@ -363,8 +363,6 @@ module spio_spinnaker_link_async_to_sync_fifo
           2'b11: rdpg <= 2'b10;
           2'b10: rdpg <= 2'b00;
 	endcase
-      else
-        rdpg <= rdpg;  // no change!
 
 
   //---------------------------------------------------------------

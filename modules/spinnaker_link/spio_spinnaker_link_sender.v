@@ -49,9 +49,7 @@ module spio_spinnaker_link_sender
   //-------------------------------------------------------------
   // internal signals
   //-------------------------------------------------------------
-  wire       synced_sl_ack;  // synchronized acknowledge input
-
-  wire [6:0] flt_data;
+  wire [6:0] flt_data_2of7;  //2-of-7 encoded data
   wire       flt_vld;
   wire       flt_rdy;
 
@@ -63,26 +61,20 @@ module spio_spinnaker_link_sender
     .PKT_DATA_IN      (PKT_DATA_IN),
     .PKT_VLD_IN       (PKT_VLD_IN),
     .PKT_RDY_OUT      (PKT_RDY_OUT),
-    .flt_data         (flt_data),
+    .flt_data_2of7    (flt_data_2of7),
     .flt_vld          (flt_vld),
     .flt_rdy          (flt_rdy)
   );
 
-  flit_output_if fo
+  spio_spinnaker_link_sync_to_async_fifo fo
   (
     .CLK_IN           (CLK_IN),
     .RESET_IN         (RESET_IN),
-    .flt_data         (flt_data),
+    .flt_data_2of7    (flt_data_2of7),
     .flt_vld          (flt_vld),
     .flt_rdy          (flt_rdy),
     .SL_DATA_2OF7_OUT (SL_DATA_2OF7_OUT),
-    .SL_ACK_IN        (synced_sl_ack)
-  );
-
-  spio_spinnaker_link_sync #(.SIZE(1)) sync
-  ( .CLK_IN (CLK_IN),
-    .IN     (SL_ACK_IN),
-    .OUT    (synced_sl_ack)
+    .SL_ACK_IN        (SL_ACK_IN)
   );
 endmodule
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
@@ -101,7 +93,7 @@ module pkt_serializer
   output reg                    PKT_RDY_OUT,
 
   // flit interface
-  output reg              [6:0] flt_data,
+  output reg              [6:0] flt_data_2of7,
   output reg                    flt_vld,
   input                         flt_rdy
 );
@@ -207,21 +199,21 @@ module pkt_serializer
 
 
   //-------------------------------------------------------------
-  // flit interface: generate flt_data
+  // flit interface: generate flt_data_2of7
   //-------------------------------------------------------------
   always @(posedge CLK_IN or posedge RESET_IN)
     if (RESET_IN)
-      flt_data <= 7'd0;
+      flt_data_2of7 <= 7'd0;
     else
       case (state)
         IDLE_ST: if (PKT_VLD_IN && !flt_busy)
-                   flt_data <= encode_nrz_2of7 ({1'b0, PKT_DATA_IN[3:0]},
-                                                 flt_data
+                   flt_data_2of7 <= encode_nrz_2of7 ({1'b0, PKT_DATA_IN[3:0]},
+                                                 flt_data_2of7
                                                );  // first nibble
 
         default: if (!flt_busy)
-                   flt_data <= encode_nrz_2of7 ({eop, pkt_buf[3:0]},
-                                                 flt_data
+                   flt_data_2of7 <= encode_nrz_2of7 ({eop, pkt_buf[3:0]},
+                                                 flt_data_2of7
                                                );  // next nibble or eop
 	                                           // first if parked
       endcase 
@@ -292,139 +284,6 @@ module pkt_serializer
 
         default: if (eop && !flt_busy)
                      state <= IDLE_ST;  // done with packet
-      endcase 
-endmodule
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-
-
-//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
-`timescale 1ns / 1ps
-module flit_output_if
-(
-  input            CLK_IN,
-  input            RESET_IN,
-
-  // packet serializer interface
-  input      [6:0] flt_data,
-  input            flt_vld,
-  output reg       flt_rdy,
-
-  // SpiNNaker link interface
-  output reg [6:0] SL_DATA_2OF7_OUT,
-  input            SL_ACK_IN
-);
-
-  //-------------------------------------------------------------
-  // constants
-  //-------------------------------------------------------------
-  localparam STATE_BITS = 2;
-  localparam IDLE_ST    = 0;
-  localparam TRAN_ST    = IDLE_ST + 1;
-  localparam WAIT_ST    = TRAN_ST + 1;  // used flit ahead of rdy!
-
-
-  //-------------------------------------------------------------
-  // internal signals
-  //-------------------------------------------------------------
-  reg old_ack;  // remember previous value of SL_ACK_IN
-  reg acked;    // detect a transition in SL_ACK_IN
-
-  reg send_flit;  // send new flit to SpiNNaker
-
-  reg [STATE_BITS - 1:0] state;  // current state
-
-
-  //-------------------------------------------------------------
-  // packet serializer interface: generate flt_rdy
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      flt_rdy <= 1'b1;
-    else
-      case (state)
-        IDLE_ST: if (flt_vld)
-                   flt_rdy <= 1'b0;  // new flit, not ready for next
-
-        default: if (acked)
-                   flt_rdy <= 1'b1;  // flit acked, ready for next
-	         else
-                   flt_rdy <= 1'b0;
-      endcase 
-
-
-  //-------------------------------------------------------------
-  // SpiNNaker link interface: generate SL_DATA_2OF7_OUT
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      SL_DATA_2OF7_OUT <= 7'd0;
-    else
-      if (send_flit)
-        SL_DATA_2OF7_OUT <= flt_data;  // send new flit
-
-
-  //-------------------------------------------------------------
-  // send a new flit to SpiNNaker
-  //-------------------------------------------------------------
-  always @(*)
-    if (RESET_IN)
-      send_flit = 1'b0;
-    else
-      case (state)
-        IDLE_ST: if (flt_vld)
-                   send_flit = 1'b1;  // send new flit
-                 else
-                   send_flit = 1'b0;  // no new flit to send
-
-        TRAN_ST: if (acked && flt_vld)
-                   send_flit = 1'b1;  // send new flit
-                 else
-                   send_flit = 1'b0;  // waiting for ack/no new flit
-
-        default:   send_flit = 1'b0;  // waiting for ack
-      endcase 
-
-
-  //-------------------------------------------------------------
-  // remember last value of SL_ACK_IN
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      old_ack <= 1'b0;
-    else
-      if (send_flit)
-        old_ack <= SL_ACK_IN;
-
-
-  //-------------------------------------------------------------
-  // detect transition in SL_ACK_IN
-  //-------------------------------------------------------------
-  always @ (*)
-    acked = (old_ack != SL_ACK_IN);
-
-
-  //-------------------------------------------------------------
-  // state machine
-  //-------------------------------------------------------------
-  always @(posedge CLK_IN or posedge RESET_IN)
-    if (RESET_IN)
-      state <= IDLE_ST;
-    else
-      case (state)
-        IDLE_ST: if (flt_vld)
-                   state <= TRAN_ST;  // send new flit
-
-        TRAN_ST:
-          case ({acked, flt_vld})
-            2'b10:   state <= IDLE_ST;  // no new flit
-	    2'b11:   state <= WAIT_ST;  // use flit and wait for ack
-            default: state <= TRAN_ST;  // wait for ack
-          endcase
-
-        default: if (acked)
-                   state <= IDLE_ST;
-                 else
-                   state <= TRAN_ST;
       endcase 
 endmodule
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
