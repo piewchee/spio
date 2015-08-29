@@ -262,7 +262,7 @@ module spio_spinnaker_link_async_to_sync_fifo
   wire upd_r;
   wire upd_a;
 
-  sel fulls
+  tel fulls
   (
     .rst (RESET_IN),
     .ri  (new_flit),
@@ -271,7 +271,7 @@ module spio_spinnaker_link_async_to_sync_fifo
     .ao  (full_a)
   );
 
-  sel wrts
+  tel wrts
   (
     .rst (RESET_IN),
     .ri  (full_to_write),
@@ -280,7 +280,7 @@ module spio_spinnaker_link_async_to_sync_fifo
     .ao  (wrt_a)
   );
 
-  sel upds
+  tel upds
   (
     .rst (RESET_IN),
     .ri  (write_to_update),
