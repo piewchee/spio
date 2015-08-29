@@ -172,7 +172,7 @@ module spio_spinnaker_link_sync_to_async_fifo
   wire akd_r;
   wire akd_a;
 
-  sel empts
+  tel empts
   (
     .rst (RESET_IN),
     .ri  (loop_r),
@@ -181,7 +181,7 @@ module spio_spinnaker_link_sync_to_async_fifo
     .ao  (empt_a)
   );
 
-  sel rds
+  tel rds
   (
     .rst (RESET_IN),
     .ri  (empty_to_read),
@@ -190,7 +190,7 @@ module spio_spinnaker_link_sync_to_async_fifo
     .ao  (rd_a)
   );
 
-  sel upds
+  tel upds
   (
     .rst (RESET_IN),
     .ri  (read_to_update),
@@ -199,7 +199,7 @@ module spio_spinnaker_link_sync_to_async_fifo
     .ao  (upd_a)
   );
 
-  sel akds
+  tel akds
   (
     .rst (RESET_IN),
     .ri  (update_to_acked),
@@ -282,11 +282,11 @@ module spio_spinnaker_link_sync_to_async_fifo
   //---------------------------------------------------------------
   reg  acked;
 
-  cel_p akdc
+  cel_n akdc
   (
     .rst (RESET_IN),
     .a   (akd_r),
-    .bp  (acked),
+    .bn  (~acked),
     .o   (akd_a)
   );
 

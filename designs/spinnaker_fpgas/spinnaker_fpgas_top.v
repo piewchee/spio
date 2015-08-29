@@ -1535,19 +1535,19 @@ IBUF  spi_mosi_buf (.I  (SPI_MOSI_IN),  .O (spi_mosi_i));
 IOBUF spi_miso_buf (.IO (SPI_MISO_OUT), .I (spi_miso_i), .T (spi_nss_i), .O());
 
 // SPI signals synchronising flip-flops
-spio_spinnaker_link_sync #( .SIZE(1)
+spinnaker_fpgas_sync #( .SIZE(1)
                       )
 sync_nss_i            ( .CLK_IN(spi_clk_i)
                       , .IN(spi_nss_i)
                       , .OUT(synced_spi_nss_i)
                       );
-spio_spinnaker_link_sync #( .SIZE(1)
+spinnaker_fpgas_sync #( .SIZE(1)
                       )
 sync_sclk_i           ( .CLK_IN(spi_clk_i)
                       , .IN(spi_sclk_i)
                       , .OUT(synced_spi_sclk_i)
                       );
-spio_spinnaker_link_sync #( .SIZE(1)
+spinnaker_fpgas_sync #( .SIZE(1)
                       )
 sync_mosi_i           ( .CLK_IN(spi_clk_i)
                       , .IN(spi_mosi_i)

@@ -64,6 +64,29 @@ endmodule
 
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 `timescale 1ns / 1ps
+module cel_n
+(
+  input  wire rst,
+
+  input  wire a,
+  input  wire bn,
+  output reg  o
+);
+  wire c;
+
+  assign #1 c = (~a & ~bn & o) | (a & ~o);
+
+  always @(posedge c or posedge rst)
+    if (rst)
+      o <= #1 1'b0;
+    else
+      o <= #1 ~o;
+endmodule
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+`timescale 1ns / 1ps
 module sel
 (
   input  wire rst,
@@ -85,6 +108,31 @@ module sel
   assign #1 ro = ~i & ri;
 
   assign #1 ai = ~(~i | ao);
+endmodule
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+`timescale 1ns / 1ps
+module tel
+(
+  input  wire rst,
+  input  wire ri,
+  output wire ai,
+  output wire ro,
+  input  wire ao
+);
+  wire i;
+
+  cel c0
+  (
+    .rst (rst),
+    .a   (ri), 
+    .b   (ao),
+    .o   (ai)
+  );
+
+  assign #1 ro = ~ai & ri;
 endmodule
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 
