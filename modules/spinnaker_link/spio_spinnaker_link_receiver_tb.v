@@ -188,6 +188,9 @@ begin
       // send end-of-packet to uut
       uut_ispl_data = encode_nrz_2of7 (`EOP, tb_old_data);
 
+      // remember ack (for transition detection)
+      tb_old_ack = uut_ispl_ack;
+
       // generate next packet
       tb_ipkt_type = tb_ipkt_type + 1;
       tb_ipkt_key = tb_ipkt_key + 1;
@@ -214,6 +217,9 @@ begin
                                         tb_old_data
                                       );
 
+      // remember ack (for transition detection)
+      tb_old_ack = uut_ispl_ack;
+
       # COMB_DELAY;
 
       // update flit counter
@@ -222,9 +228,6 @@ begin
 
     // remember data (for nrz encoding)
     tb_old_data = uut_ispl_data;
-
-    // remember ack (for transition detection)
-    tb_old_ack = uut_ispl_ack;
 
     // wait for ack from uut
     wait (tb_old_ack != uut_ispl_ack);
