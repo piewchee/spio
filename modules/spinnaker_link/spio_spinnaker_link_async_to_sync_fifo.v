@@ -87,6 +87,30 @@ endmodule
 
 //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 `timescale 1ns / 1ps
+module cel3_n2
+(
+  input  wire rst,
+
+  input  wire a,
+  input  wire bn,
+  input  wire cn,
+  output reg  o
+);
+  wire c;
+
+  assign #1 c = (~a & ~bn & ~cn & o) | (a & ~o);
+
+  always @(posedge c or posedge rst)
+    if (rst)
+      o <= #1 1'b0;
+    else
+      o <= #1 ~o;
+endmodule
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+
+
+//+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+`timescale 1ns / 1ps
 module sel
 (
   input  wire rst,
@@ -170,6 +194,16 @@ module spio_spinnaker_link_async_to_sync_fifo
   reg  new_flit;  // new flit arrived
   wire ack_flit;  // send ack to SpiNNaker (toggle SL_ACK_OUT)
 
+  wire s0_s1;  // control operation sequence
+
+  // operation handshakes
+  wire full_r;
+  wire full_a;
+  wire wrt_r;
+  wire wrt_a;
+  wire upd_r;
+  wire upd_a;
+
   reg  [6:0] old_data;  // remember previous nrz 2of7 data for rtz translation
   reg  [6:0] rtz_data;  // data translated from nrz to rtz
 
@@ -190,6 +224,21 @@ module spio_spinnaker_link_async_to_sync_fifo
 
   // sync interface
   reg  flt_busy;
+
+
+  //-------------------------------------------------------------
+  // gray code counter (for buffer read and write pointers)
+  //-------------------------------------------------------------
+  function [ADDR_WIDTH - 1:0] gray_count ;
+    input [ADDR_WIDTH - 1:0] ctr;
+
+    case (ctr)
+      2'b00: gray_count = 2'b01;
+      2'b01: gray_count = 2'b11;
+      2'b11: gray_count = 2'b10;
+      2'b10: gray_count = 2'b00;
+    endcase
+  endfunction
 
 
   //-------------------------------------------------------------
@@ -217,7 +266,9 @@ module spio_spinnaker_link_async_to_sync_fifo
   //-------------------------------------------------------------
   // ack signal to SpiNNaker (merged with RESET_IN to ack on reset exit)
   //-------------------------------------------------------------
-  always @(posedge ack_flit or posedge RESET_IN)
+//!  always @(posedge ack_flit or posedge RESET_IN)
+//!  always @(posedge s0_s1 or posedge RESET_IN)
+  always @(posedge req_flit or posedge RESET_IN)
     if (RESET_IN)
       ack_out <= 1'b0;
     else
@@ -248,57 +299,15 @@ module spio_spinnaker_link_async_to_sync_fifo
     new_flit = detect_2of7 (rtz_data);
 
 
-  //-------------------------------------------------------------
-  // sequence operations:
-  // wait for not full, write buffer and update wrpg
-  //-------------------------------------------------------------
-  wire full_to_write;
-  wire write_to_update;
-
-  wire full_r;
-  wire full_a;
-  wire wrt_r;
-  wire wrt_a;
-  wire upd_r;
-  wire upd_a;
-
-  tel fulls
-  (
-    .rst (RESET_IN),
-    .ri  (new_flit),
-    .ai  (full_to_write),
-    .ro  (full_r),
-    .ao  (full_a)
-  );
-
-  tel wrts
-  (
-    .rst (RESET_IN),
-    .ri  (full_to_write),
-    .ai  (write_to_update),
-    .ro  (wrt_r),
-    .ao  (wrt_a)
-  );
-
-  tel upds
-  (
-    .rst (RESET_IN),
-    .ri  (write_to_update),
-    .ai  (ack_flit),
-    .ro  (upd_r),
-    .ao  (upd_a)
-  );
-
-
   //---------------------------------------------------------------
-  // wait for not full
+  // wait for new flit and buffer not full
   //---------------------------------------------------------------
   cel_p fullc
   (
     .rst (RESET_IN),
-    .a   (full_r),
+    .a   (new_flit),
     .bp  (~buf_full),
-    .o   (full_a)
+    .o   (req_flit)
   );
 
 
@@ -306,13 +315,29 @@ module spio_spinnaker_link_async_to_sync_fifo
   // buffer full indication
   //---------------------------------------------------------------
   always @(*)
-    case ({wrpg, rdpg})
-      4'b00_01,
-      4'b01_11,
-      4'b11_10,
-      4'b10_00: buf_full = #1 1'b1;
-      default:  buf_full = #1 1'b0;
-    endcase
+    buf_full = (rdpg == gray_count (wrpg));
+
+
+  //-------------------------------------------------------------
+  // sequence operations: not full, write buffer and update wrpg
+  //-------------------------------------------------------------
+  tel wrts
+  (
+    .rst (RESET_IN),
+    .ri  (req_flit),
+    .ai  (s0_s1),
+    .ro  (wrt_r),
+    .ao  (wrt_a)
+  );
+
+  tel upds
+  (
+    .rst (RESET_IN),
+    .ri  (s0_s1),
+    .ai  (ack_flit),
+    .ro  (upd_r),
+    .ao  (upd_a)
+  );
 
 
   //-------------------------------------------------------------
@@ -341,12 +366,7 @@ module spio_spinnaker_link_async_to_sync_fifo
     if (RESET_IN)
       wrpg <= 0;
     else
-      case (wrpg)
-        2'b00: wrpg <= 2'b01;
-        2'b01: wrpg <= 2'b11;
-        2'b11: wrpg <= 2'b10;
-        2'b10: wrpg <= 2'b00;
-      endcase
+      wrpg <= gray_count (wrpg);
 
 
   //-------------------------------------------------------------
@@ -405,12 +425,7 @@ module spio_spinnaker_link_async_to_sync_fifo
       rdpg <= 0;
     else
       if (vld_rd)      // update pointer on valid read
-        case (rdpg)
-          2'b00: rdpg <= 2'b01;
-          2'b01: rdpg <= 2'b11;
-          2'b11: rdpg <= 2'b10;
-          2'b10: rdpg <= 2'b00;
-	endcase
+        rdpg <= gray_count (rdpg);
 
 
   //---------------------------------------------------------------

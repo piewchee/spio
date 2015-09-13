@@ -65,6 +65,21 @@ module spio_spinnaker_link_sync_to_async_fifo
 
 
   //-------------------------------------------------------------
+  // gray code counter
+  //-------------------------------------------------------------
+  function [ADDR_WIDTH - 1:0] gray_count ;
+    input [ADDR_WIDTH - 1:0] ctr;
+
+    case (ctr)
+      2'b00: gray_count = 2'b01;
+      2'b01: gray_count = 2'b11;
+      2'b11: gray_count = 2'b10;
+      2'b10: gray_count = 2'b00;
+    endcase
+  endfunction
+
+
+  //-------------------------------------------------------------
   // packet serializer interface: generate flt_rdy
   //-------------------------------------------------------------
   always @(posedge CLK_IN or posedge RESET_IN)
@@ -100,12 +115,7 @@ module spio_spinnaker_link_sync_to_async_fifo
       wrpg <= 0;
     else
       if (vld_wr)
-        case (wrpg)
-          2'b00: wrpg <= 2'b01;
-          2'b01: wrpg <= 2'b11;
-          2'b11: wrpg <= 2'b10;
-          2'b10: wrpg <= 2'b00;
-	endcase
+        wrpg <= gray_count (wrpg);
 
 
   //---------------------------------------------------------------
@@ -123,26 +133,28 @@ module spio_spinnaker_link_sync_to_async_fifo
   // buffer full indication
   //---------------------------------------------------------------
   always @(*)
-    case ({wrpg, s_rdpg})
-      4'b00_01,
-      4'b01_11,
-      4'b11_10,
-      4'b10_00: buf_full = #1 1'b1;
-      default:  buf_full = #1 1'b0;
-    endcase
+    buf_full = #1 (s_rdpg == gray_count (wrpg));
 
 
   //---------------------------------------------------------------
-  // buffer near full iindication
+  // buffer near full indication (will go full if write happens)
   //---------------------------------------------------------------
   always @(*)
-    case ({wrpg, s_rdpg})
-      4'b00_11,
-      4'b01_10,
-      4'b11_00,
-      4'b10_01: buf_nf = #1 1'b1;
-      default:  buf_nf = #1 1'b0;
-    endcase
+    buf_nf = #1 (s_rdpg == gray_count (gray_count (wrpg)));
+
+
+  //-------------------------------------------------------------
+  // wait for not empty to start async output process
+  //-------------------------------------------------------------
+  wire init;
+
+  cel_n initc
+  (
+    .rst (RESET_IN),
+    .a   (~buf_empty),
+    .bn  (~RESET_IN),
+    .o   (init)
+  );
 
 
   //-------------------------------------------------------------
@@ -152,49 +164,27 @@ module spio_spinnaker_link_sync_to_async_fifo
   wire loop_a;
 
   always @(*)
-    loop_r = ~(loop_a || RESET_IN);
+    loop_r = ~(loop_a || ~init);
 
 
   //-------------------------------------------------------------
   // sequence operations:
   //  wait for not empty, read buffer, update rdpg and wait for ack
   //-------------------------------------------------------------
-  wire empty_to_read;
-  wire read_to_update;
-  wire update_to_acked;
+  wire s0_s1;
 
-  wire empt_r;
-  wire empt_a;
-  wire rd_r;
-  wire rd_a;
   wire upd_r;
   wire upd_a;
   wire akd_r;
   wire akd_a;
-
-  tel empts
-  (
-    .rst (RESET_IN),
-    .ri  (loop_r),
-    .ai  (empty_to_read),
-    .ro  (empt_r),
-    .ao  (empt_a)
-  );
-
-  tel rds
-  (
-    .rst (RESET_IN),
-    .ri  (empty_to_read),
-    .ai  (read_to_update),
-    .ro  (rd_r),
-    .ao  (rd_a)
-  );
+  wire empt_r;
+  wire empt_a;
 
   tel upds
   (
     .rst (RESET_IN),
-    .ri  (read_to_update),
-    .ai  (update_to_acked),
+    .ri  (loop_r),
+    .ai  (s0_s1),
     .ro  (upd_r),
     .ao  (upd_a)
   );
@@ -202,52 +192,21 @@ module spio_spinnaker_link_sync_to_async_fifo
   tel akds
   (
     .rst (RESET_IN),
-    .ri  (update_to_acked),
+    .ri  (s0_s1),
     .ai  (loop_a),
     .ro  (akd_r),
     .ao  (akd_a)
   );
 
 
-  //---------------------------------------------------------------
-  // wait for not empty
-  //---------------------------------------------------------------
-  cel_p emptc
-  (
-    .rst (RESET_IN),
-    .a   (empt_r),
-    .bp  (~buf_empty),
-    .o   (empt_a)
-  );
-
-
-  //---------------------------------------------------------------
-  // buffer full indication
-  //---------------------------------------------------------------
-  always @(*)
-    buf_empty = (rdpg == wrpg);
-
-
   //-------------------------------------------------------------
   // SpiNNaker async link interface: generate SL_DATA_2OF7_OUT
   //-------------------------------------------------------------
-  always @ (posedge rd_r or posedge RESET_IN)
+  always @ (posedge loop_r or posedge RESET_IN)
     if (RESET_IN)
       SL_DATA_2OF7_OUT <= 7'd0;
     else
       SL_DATA_2OF7_OUT <= buffer[rdpg];
-
-
-  //-------------------------------------------------------------
-  // ack read from buffer
-  //-------------------------------------------------------------
-  cel rdc
-  (
-    .rst (RESET_IN),
-    .a   (rd_r),
-    .b   (~rd_a),
-    .o   (rd_a)
-  );
 
 
   //---------------------------------------------------------------
@@ -257,12 +216,7 @@ module spio_spinnaker_link_sync_to_async_fifo
     if (RESET_IN)
       rdpg <= 0;
     else
-      case (rdpg)
-        2'b00: rdpg <= 2'b01;
-        2'b01: rdpg <= 2'b11;
-        2'b11: rdpg <= 2'b10;
-        2'b10: rdpg <= 2'b00;
-      endcase
+      rdpg <= gray_count (rdpg);
 
 
   //-------------------------------------------------------------
@@ -278,17 +232,25 @@ module spio_spinnaker_link_sync_to_async_fifo
 
 
   //---------------------------------------------------------------
-  // wait for acked
+  // wait for acked and not empty
   //---------------------------------------------------------------
   reg  acked;
 
-  cel_n akdc
+  cel3_n2 akdc
   (
     .rst (RESET_IN),
     .a   (akd_r),
     .bn  (~acked),
+    .cn  (buf_empty),
     .o   (akd_a)
   );
+
+
+  //---------------------------------------------------------------
+  // buffer full indication
+  //---------------------------------------------------------------
+  always @(*)
+    buf_empty = (rdpg == wrpg);
 
 
   //---------------------------------------------------------------
@@ -301,7 +263,7 @@ module spio_spinnaker_link_sync_to_async_fifo
   //-------------------------------------------------------------
   // remember previous value of ack to detect transition
   //-------------------------------------------------------------
-  always @ (posedge rd_r)
+  always @ (posedge loop_r)
     old_ack <= SL_ACK_IN;
   //+++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++++
 endmodule
