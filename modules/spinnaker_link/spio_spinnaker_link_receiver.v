@@ -79,7 +79,7 @@ module spio_spinnaker_link_receiver
   (
     .CLK_IN          (CLK_IN),
     .RESET_IN        (RESET_IN),
-    .FLT_ERR_OUT     (FLT_ERROR_OUT),
+    .FLT_ERR_OUT     (FLT_ERR_OUT),
     .FRM_ERR_OUT     (FRM_ERR_OUT),
     .flt_data_2of7   (flt_data_2of7),
     .flt_rdy         (flt_rdy),
